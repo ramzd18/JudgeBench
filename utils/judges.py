@@ -574,9 +574,9 @@ class SkyworkReward(Judge):
     
     
 class KodamaJudge(Judge):
-    def __init__(self, model_name) -> None:
+    def __init__(self, model_name, api) -> None:
         self.model_name = model_name
-        self.api = models.get_chat_api_from_model(model_name)
+        self.api = api
 
         
         
