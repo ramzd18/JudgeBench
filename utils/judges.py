@@ -570,51 +570,117 @@ class SkyworkReward(Judge):
             },
             "decision": judgement
         }
-        
 
-class CompassJudger(Judge):
+    
+    
+class KodamaJudge(Judge):
     def __init__(self, model_name) -> None:
         self.model_name = model_name
         self.api = models.get_chat_api_from_model(model_name)
+
         
-    def get_score(cls, judgment: str, pattern: str, pairwise: bool = True) -> Tuple[Union[int, str], Optional[bool]]:
-        matches = pattern.findall(judgment)
-        matches = [m for m in matches if m != ""]
-        if len(set(matches)) == 0:
-            return None, True
-        elif len(set(matches)) == 1:
-            if pairwise:
-                return matches[0].strip("\n"), False
-            return int(matches[0])
-        else:
-            return None, False
         
     async def get_judgment(self, question: str, answer_A: str, answer_B: str) -> Dict[str, Any]:
-        system_message = prompts.render_template(
-            "arena_hard_judge_system")
-        user_message = prompts.render_template("arena_hard_judge_prompt",
-                                                    prompt=question, answer_a=answer_A, answer_b=answer_B)
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message},
-        ]
-
-        output = await self.api.chat(
-            messages=messages,
-            temperature=0.0,
-            max_tokens=2048,
+        prompt_a = prompts.render_template(
+            "kodama_prompt_feedback",
+            question=question,
+            response=answer_A
         )
+        prompt_b = prompts.render_template(
+            "kodama_prompt_feedback",
+            question=question,
+            response=answer_B
+        )
+        messages_a = [
+            {"role": "user", "content": prompt_a}
+        ]
+        messages_b = [
+            {"role": "user", "content": prompt_b}
+        ]
         
-        score, _ = self.get_score(output, re.compile("\[\[([AB<>=]+)\]\]"))
+        output_a = await self.api.chat(
+            messages=messages_a,
+            temperature=0.1,
+            max_tokens=1024,
+        )
+        output_b = await self.api.chat(
+            messages=messages_b,
+            temperature=0.1,
+            max_tokens=1024,
+        )
+        prompt_score_a = prompts.render_template(
+            "kodama_prompt_score",
+            question=question,
+            answer=answer_A,
+            feedback=output_a
+        )
+        prompt_score_b = prompts.render_template(
+            "kodama_prompt_score",
+            question=question,
+            answer=answer_B,
+            feedback=output_b
+        )
+
+        output_score_a = await self.parse_score(self.api.chat(
+            messages=messages_a,
+            temperature=0.1,
+            max_tokens=1024,
+        ))
         
+        output_score_b = await self.parse_score(self.api.chat(
+            messages=messages_b,
+            temperature=0.1,
+            max_tokens=1024,
+        ))
+        
+        final_response = prompts.render_template(
+            "kodama_final_response",
+            question=question,
+            answer_a=answer_A,
+            answer_b=answer_B,
+            feedback_a=output_a,
+            feedback_b=output_b,
+            score_a=output_score_a,
+            score_b=output_score_b
+        )
+        final_response_value = await self.parse_final_decision(self.api.chat(
+            messages=messages_a,
+            temperature=0.1,
+            max_tokens=1024,
+        ))
         return {
             "judgment": {
                 "judge_model": self.model_name,
-                "prompt": messages[1]["content"],
-                "response": output,
+                "prompt": final_response,
+                "response": output_score_a
             },
-            "decision": score.replace(">>", ">").strip() if score else None
+            "decision": final_response_value
         }
+        
+    def parse_score(self, output_score: str) -> float:
+        # Look for a numerical score in the output
+        score_pattern = r'(\d+(?:\.\d+)?)'
+        match = re.search(score_pattern, output_score)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return 0.0
+        return 0.0
+
+    def parse_final_decision(self, final_response: str) -> str:
+        # Look for common comparison patterns
+        final_response = final_response.lower()
+        if any(x in final_response for x in ["a wins", "a is better", "a outperforms", "a > b", "[[A]]", "[A]"]):
+            return "A>B"
+        elif any(x in final_response for x in ["b wins", "b is better", "b outperforms", "b > a", "[[B]]", "[B]"]):
+            return "B>A"
+        else:
+            return "A<B"
+
+        
+
+        
 
 
 def get_judge_from_judge_name_and_model(judge_name: str, judge_model: str) -> Judge:
@@ -632,8 +698,8 @@ def get_judge_from_judge_name_and_model(judge_name: str, judge_model: str) -> Ju
         return Prometheus2(judge_model)
     elif judge_name == "skywork_critic":
         return SkyworkCritic(judge_model)
-    elif judge_name == "compass_judger":
-        return CompassJudger(judge_model)
+    # elif judge_name == "compass_judger":
+    #     return CompassJudger(judge_model)
     elif judge_name == "reward_model":
         if judge_model in ["internlm/internlm2-7b-reward", "internlm/internlm2-20b-reward"]:
             return InternLM2Reward(judge_model)
