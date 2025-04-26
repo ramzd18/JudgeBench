@@ -6,7 +6,7 @@ from utils.judges import KodamaJudge
 from typing import List, Dict
 
 # Load model and tokenizer
-model_name = "rpeddu/kodama-checkpoint"
+model_name = "rpeddu/kodama-checkpoint-3"
 model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 # Create a local model chat API class
