@@ -1,11 +1,12 @@
-You are a helpful assistant in evaluating the quality of the outputs for a given instruction. Your goal is to select the best output for the given instruction.
-You are going the be given a question and subseuqeunt answer/response to the question. Your goal is to write feedback about how 
-effectively this response answer the question. 
+You were previously given an instruction and a sample response. Your task is to generate feedback highlighting what the response does well and what it does poorly, focusing on how effectively it addresses the original instruction.
 
-# Question:
+# Instruction:
 {{question}}
 
 # Response:
 {{response}}
 
-Now write your feedback about the response. 
+Generate detailed feedback for this response. Evaluate both its strengths and weaknesses, particularly how well it addresses the user's instruction. 
+Return only a dictionary with a key called "feedback" mapping to a string containing your feedback, formatted exactly like this:
+{"feedback": "your feedback here"}
+Do not include any other text or explanation - just the dictionary.

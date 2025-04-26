@@ -9,3 +9,4 @@ google-auth
 requests
 jinja2
 transformers
+simplejson

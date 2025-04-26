@@ -5,6 +5,10 @@ import re
 import utils.prompts as prompts
 import utils.models as models
 
+import json 
+import ast
+import simplejson as _json_tol
+
 # run judge on pairs
 # judges should take a question and two responses, and return a decision (e.g., A>B or B>A)
 # Note B>A and not A<B
@@ -608,31 +612,92 @@ class KodamaJudge(Judge):
             temperature=0.1,
             max_tokens=1024,
         )
+        feedback_a = ""
+        feedback_b = ""
+        try:
+            feedback_a = self.parse_llm_json(output_a)
+            feedback_a = feedback_a["feedback"]
+            feedback_b = self.parse_llm_json(output_b)
+            feedback_b = feedback_b["feedback"]
+            print("SUCCESSFUL FEEDBACK")
+        except:
+            # Retry with higher temperature
+            try:
+                output_a = await self.api.chat(
+                    messages=messages_a,
+                    temperature=0.2,
+                    max_tokens=1024,
+                )
+                output_b = await self.api.chat(
+                    messages=messages_b, 
+                    temperature=0.2,
+                    max_tokens=1024,
+                )
+                feedback_a = self.parse_llm_json(output_a)
+                feedback_a = feedback_a["feedback"]
+                feedback_b = self.parse_llm_json(output_b)
+                feedback_b = feedback_b["feedback"]
+                print("SUCCESSFUL FEEDBACK ON RETRY")
+            except:
+                feedback_a = ""
+                feedback_b = ""
+                print("FAILED FEEDBACK AFTER RETRY")
+            
         prompt_score_a = prompts.render_template(
             "kodama_prompt_score",
             question=question,
-            answer=answer_A,
-            feedback=output_a
+            response=answer_A,
+            feedback=feedback_a
         )
         prompt_score_b = prompts.render_template(
             "kodama_prompt_score",
             question=question,
-            answer=answer_B,
-            feedback=output_b
+            response=answer_B,
+            feedback=feedback_b
         )
 
-        output_score_a = await self.parse_score(self.api.chat(
-            messages=messages_a,
-            temperature=0.1,
-            max_tokens=1024,
-        ))
+        # Try to get valid scores with retry
+        messages_score_a = [{"role": "user", "content": prompt_score_a}]
+        messages_score_b = [{"role": "user", "content": prompt_score_b}]
         
-        output_score_b = await self.parse_score(self.api.chat(
-            messages=messages_b,
-            temperature=0.1,
-            max_tokens=1024,
-        ))
-        
+        try:
+            output_score_a = await self.api.chat(
+                messages=messages_score_a,
+                temperature=0.1,
+                max_tokens=1024,
+            )
+            output_score_b = await self.api.chat(
+                messages=messages_score_b,
+                temperature=0.1,
+                max_tokens=1024,
+            )
+            score_a = self.parse_llm_json(output_score_a)
+            score_a = score_a["score"]
+            score_b = self.parse_llm_json(output_score_b) 
+            score_b = score_b["score"]
+            print("SUCCESSFUL SCORES")
+        except:
+            try:
+                output_score_a = await self.api.chat(
+                    messages=messages_score_a,
+                    temperature=0.2,
+                    max_tokens=1024,
+                )
+                output_score_b = await self.api.chat(
+                    messages=messages_score_b,
+                    temperature=0.2,
+                    max_tokens=1024,
+                )
+                score_a = self.parse_llm_json(output_score_a)
+                score_a = score_a["score"]
+                score_b = self.parse_llm_json(output_score_b)
+                score_b = score_b["score"]
+                print("SUCCESSFUL SCORES ON RETRY")
+            except:
+                score_a = 0.0
+                score_b = 0.0
+                print("FAILED SCORES AFTER RETRY")
+
         final_response = prompts.render_template(
             "kodama_final_response",
             question=question,
@@ -678,9 +743,75 @@ class KodamaJudge(Judge):
         else:
             return "A<B"
 
-        
+    def parse_llm_json(self,output: str) -> Dict[str, Any]:
+        """
+        Robustly parse a JSON string returned by an LLM into a Python dict.
 
-        
+        This function handles common issues:s
+        - Strips Markdown code fences (```json ...```, ```...```)
+        - Extracts all balanced { ... } blocks
+        - Cleans trailing commas
+        - Tries json.loads, then simplejson (if installed), then ast.literal_eval
+        """
+        # 1) Extract any ```json ... ``` blocks (or plain ```...```)
+        fence_blocks = re.findall(r'```(?:json)?\s*(.*?)```', output, flags=re.S)
+        candidates = fence_blocks if fence_blocks else []
+
+        # 2) If no code fences, scan for balanced braces spans
+        if not candidates:
+            stack = []
+            start_idx = None
+            for i, ch in enumerate(output):
+                if ch == '{':
+                    if start_idx is None:
+                        start_idx = i
+                    stack.append(ch)
+                elif ch == '}' and stack:
+                    stack.pop()
+                    if not stack and start_idx is not None:
+                        candidates.append(output[start_idx:i+1])
+                        start_idx = None
+
+        # canonical cleanup: remove trailing commas before } or ]
+        def cleanup(text: str) -> str:
+            text = re.sub(r',\s*(\}|])', r'\1', text)
+            return text
+
+        # 3) Try parsing each candidate
+        errors = []
+        for cand in candidates:
+            text = cleanup(cand)
+            for loader in (self._try_json, self._try_simplejson, self._try_literal_eval):
+                result, err = loader(text)
+                if err is None:
+                    return result
+                errors.append(err)
+
+        # If we get here, nothing worked
+        err_msgs = "\n".join(f"- {e}" for e in errors if e)
+        raise ValueError(f"Could not parse any JSON from output. Tried {len(candidates)} candidate blocks:\n{err_msgs}")
+
+    def _try_json(self,txt: str) -> (Optional[Dict[str, Any]], Optional[str]):
+        try:
+            return json.loads(txt), None
+        except Exception as e:
+            return None, f"json.loads failed: {e}"
+
+    def _try_simplejson(self,txt: str) -> (Optional[Dict[str, Any]], Optional[str]):
+        if not _json_tol:
+            return None, "simplejson not installed"
+        try:
+            return _json_tol.loads(txt), None
+        except Exception as e:
+            return None, f"simplejson.loads failed: {e}"
+
+    def _try_literal_eval(self,txt: str) -> (Optional[Dict[str, Any]], Optional[str]):
+        try:
+            # ast.literal_eval will accept Python‑style dicts (e.g. single quotes)
+            return ast.literal_eval(txt), None
+        except Exception as e:
+            return None, f"literal_eval failed: {e}"        
+            
 
 
 def get_judge_from_judge_name_and_model(judge_name: str, judge_model: str) -> Judge:

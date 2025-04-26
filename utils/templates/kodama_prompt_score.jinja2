@@ -1,13 +1,15 @@
-You are a helpful assistant in evaluating the quality of the outputs for a given instruction. Your goal is to select the best output for the given instruction.
-You are going the be given a question and subseuqeunt answer/response to the question, and feedback about that answer. Your goal is to generate score between 0 and 10 of 
-the answer based on the feedback.
-# Question:
+You were previously given an instruction and a sample response.
+
+# Instruction:
 {{question}}
 
-# Answer:
+# Response:
 {{response}}
 
-# Feedback: 
+# Feedback:
 {{feedback}}
 
-Now generate a score between 0 and 10 of the answer based on the feedback. Output only the score. 
+Based on the feedback, please generate a score for this response between 0-5.
+Return ONLY a dictionary with a 'score' key mapping to a float containing this score, formatted exactly like this:
+{"score": 3.5}
+Do not include any other text or explanation - just the dictionary.

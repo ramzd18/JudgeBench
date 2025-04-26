@@ -9,7 +9,6 @@ from typing import List, Dict
 model_name = "rpeddu/kodama-checkpoint"
 model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-
 # Create a local model chat API class
 class LocalModelAPI:
     def __init__(self, model, tokenizer):
@@ -25,10 +24,14 @@ class LocalModelAPI:
             prompt += f"{role}: {content}\n"
             
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        
+        # Add repetition penalty to discourage repeated text
         outputs = self.model.generate(
             **inputs,
             max_new_tokens=512,
             temperature=kwargs.get("temperature", 0.1),
+            repetition_penalty=1.2, 
+            no_repeat_ngram_size=6, 
         )
         response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         
