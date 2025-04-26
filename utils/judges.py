@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+
 from typing import List, Dict, Any, Optional, Tuple, Union
 import re
 
@@ -713,11 +713,11 @@ class KodamaJudge(Judge):
                     continue
 
         if len(scores_a) > 0 and len(scores_b) > 0:
-            score_a = sum(scores_a) / len(scores_a) 
-            score_b = sum(scores_b) / len(scores_b)
+            fin_score_a = sum(scores_a) / len(scores_a) 
+            fin_score_b = sum(scores_b) / len(scores_b)
         else:
-            score_a = 0.0
-            score_b = 0.0
+            fin_score_a = 0.0
+            fin_score_b = 0.0
             print("NO SUCCESSFUL SCORES OBTAINED")
 
         scores_a_no_feedback=[]
@@ -768,8 +768,8 @@ class KodamaJudge(Judge):
             score_a_n = 0.0
             score_b_n = 0.0
             print("NO SUCCESSFUL SCORES OBTAINED")
-        average_score_a = (score_a + score_a_n) / 2
-        average_score_b = (score_b + score_b_n) / 2
+        average_score_a = (fin_score_a + score_a_n) / 2
+        average_score_b = (fin_score_b + score_b_n) / 2
 
         final_response = prompts.render_template(
             "kodama_final_response",
