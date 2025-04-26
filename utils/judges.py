@@ -655,48 +655,121 @@ class KodamaJudge(Judge):
             response=answer_B,
             feedback=feedback_b
         )
-
-        # Try to get valid scores with retry
         messages_score_a = [{"role": "user", "content": prompt_score_a}]
         messages_score_b = [{"role": "user", "content": prompt_score_b}]
         
-        try:
-            output_score_a = await self.api.chat(
-                messages=messages_score_a,
-                temperature=0.1,
-                max_tokens=1024,
-            )
-            output_score_b = await self.api.chat(
-                messages=messages_score_b,
-                temperature=0.1,
-                max_tokens=1024,
-            )
-            score_a = self.parse_llm_json(output_score_a)
-            score_a = score_a["score"]
-            score_b = self.parse_llm_json(output_score_b) 
-            score_b = score_b["score"]
-            print("SUCCESSFUL SCORES")
-        except:
+        prompt_score_a_no_feedback = prompts.render_template(
+            "kodama_prompt_score_nfeedback",
+            question=question,
+            response=answer_A
+        )
+        prompt_score_b_no_feedback = prompts.render_template(
+            "kodama_prompt_score_nfeedback",
+            question=question,
+            response=answer_B
+        )
+        messages_score_a_no_feedback = [{"role": "user", "content": prompt_score_a_no_feedback}]
+        messages_score_b_no_feedback = [{"role": "user", "content": prompt_score_b_no_feedback}]
+        
+        scores_a = []
+        scores_b = []
+        for _ in range(3):
             try:
                 output_score_a = await self.api.chat(
                     messages=messages_score_a,
-                    temperature=0.2,
+                    temperature=0.15,
                     max_tokens=1024,
                 )
                 output_score_b = await self.api.chat(
                     messages=messages_score_b,
-                    temperature=0.2,
+                    temperature=0.15,
                     max_tokens=1024,
                 )
                 score_a = self.parse_llm_json(output_score_a)
-                score_a = score_a["score"]
+                scores_a.append(score_a["score"])
                 score_b = self.parse_llm_json(output_score_b)
-                score_b = score_b["score"]
-                print("SUCCESSFUL SCORES ON RETRY")
+                scores_b.append(score_b["score"])
+                print("SUCCESSFUL SCORES")
             except:
-                score_a = 0.0
-                score_b = 0.0
-                print("FAILED SCORES AFTER RETRY")
+                try:
+                    # Retry with higher temperature
+                    output_score_a = await self.api.chat(
+                        messages=messages_score_a,
+                        temperature=0.2,
+                        max_tokens=1024,
+                    )
+                    output_score_b = await self.api.chat(
+                        messages=messages_score_b,
+                        temperature=0.2,
+                        max_tokens=1024,
+                    )
+                    score_a = self.parse_llm_json(output_score_a)
+                    scores_a.append(score_a["score"])
+                    score_b = self.parse_llm_json(output_score_b)
+                    scores_b.append(score_b["score"])
+                    print("SUCCESSFUL SCORES ON RETRY")
+                except:
+                    print("FAILED SCORES FOR THIS RUN, SKIPPING")
+                    continue
+
+        if len(scores_a) > 0 and len(scores_b) > 0:
+            score_a = sum(scores_a) / len(scores_a) 
+            score_b = sum(scores_b) / len(scores_b)
+        else:
+            score_a = 0.0
+            score_b = 0.0
+            print("NO SUCCESSFUL SCORES OBTAINED")
+
+        scores_a_no_feedback=[]
+        scores_b_no_feedback=[]
+        for _ in range(3):
+            try:
+                output_score_a = await self.api.chat(
+                    messages=messages_score_a_no_feedback,
+                    temperature=0.15,
+                    max_tokens=1024,
+                )
+                output_score_b = await self.api.chat(
+                    messages=messages_score_b_no_feedback,
+                    temperature=0.15,
+                    max_tokens=1024,
+                )
+                score_a = self.parse_llm_json(output_score_a)
+                scores_a_no_feedback.append(score_a["score"])
+                score_b = self.parse_llm_json(output_score_b)
+                scores_b_no_feedback.append(score_b["score"])
+                print("SUCCESSFUL SCORES")
+            except:
+                try:
+                    # Retry with higher temperature
+                    output_score_a = await self.api.chat(
+                        messages=messages_score_a_no_feedback,
+                        temperature=0.2,
+                        max_tokens=1024,
+                    )
+                    output_score_b = await self.api.chat(
+                        messages=messages_score_b_no_feedback,
+                        temperature=0.2,
+                        max_tokens=1024,
+                    )
+                    score_a = self.parse_llm_json(output_score_a)
+                    scores_a_no_feedback.append(score_a["score"])
+                    score_b = self.parse_llm_json(output_score_b)
+                    scores_b_no_feedback.append(score_b["score"])
+                    print("SUCCESSFUL SCORES ON RETRY")
+                except:
+                    print("FAILED SCORES FOR THIS RUN, SKIPPING")
+                    continue
+
+        if len(scores_a_no_feedback) > 0 and len(scores_b_no_feedback) > 0:
+            score_a_n = sum(scores_a_no_feedback) / len(scores_a_no_feedback) 
+            score_b_n = sum(scores_b_no_feedback) / len(scores_b_no_feedback)
+        else:
+            score_a_n = 0.0
+            score_b_n = 0.0
+            print("NO SUCCESSFUL SCORES OBTAINED")
+        average_score_a = (score_a + score_a_n) / 2
+        average_score_b = (score_b + score_b_n) / 2
 
         final_response = prompts.render_template(
             "kodama_final_response",
@@ -708,18 +781,35 @@ class KodamaJudge(Judge):
             score_a=output_score_a,
             score_b=output_score_b
         )
-        final_response_value = await self.parse_final_decision(self.api.chat(
+        final_response_value = await (self.api.chat(
             messages=messages_a,
             temperature=0.1,
             max_tokens=1024,
         ))
+        decision = None
+        try: 
+            final_response_value = self.parse_llm_json(final_response_value)
+            decision= final_response_value["decision"]
+        except:
+            decision = None 
+        if decision and decision.contains("A"):
+            decision = "A>B"
+        elif decision and decision.contains("B"):
+            decision = "B>A"
+        else: 
+            print("FAILED TO GET VALID DECISION")
+            if average_score_a and average_score_b:
+                if average_score_a > average_score_b:
+                    decision = "A>B"
+                else:
+                    decision = "B>A"
         return {
             "judgment": {
                 "judge_model": self.model_name,
                 "prompt": final_response,
                 "response": output_score_a
             },
-            "decision": final_response_value
+            "decision": decision
         }
         
     def parse_score(self, output_score: str) -> float:
